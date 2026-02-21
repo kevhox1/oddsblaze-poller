@@ -78,7 +78,6 @@ async function fetchAllSportsbooks() {
 // ─── Filter ────────────────────────────────────────────────────────
 
 function filterEvents(bookEvents) {
-  const now = Date.now();
   const filtered = {};
   for (const [book, events] of Object.entries(bookEvents)) {
     filtered[book] = events.map(event => {
@@ -94,16 +93,7 @@ function filterEvents(bookEvents) {
         live: event.live,
         odds: filteredOdds,
       };
-    }).filter(event => {
-      // Drop live events
-      if (event.live) return false;
-      // Drop events that have already started (game time has passed)
-      if (event.date) {
-        const gameTime = new Date(event.date).getTime();
-        if (gameTime <= now) return false;
-      }
-      return true;
-    });
+    }).filter(event => !event.live); // drop live events entirely
   }
   return filtered;
 }

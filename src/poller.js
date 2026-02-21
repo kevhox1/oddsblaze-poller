@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import axios from 'axios';
+import https from 'https';
 import fs from 'fs';
 
 // ─── Config ────────────────────────────────────────────────────────
@@ -7,7 +7,7 @@ const API_KEY = process.env.ODDSBLAZE_API_KEY;
 const POLL_INTERVAL = parseInt(process.env.POLL_INTERVAL_MS || '4000', 10);
 const CACHE_PATH = process.env.CACHE_FILE_PATH || '/tmp/oddsblaze-cache.json';
 const LEAGUE = process.env.LEAGUE || 'nba';
-const API_BASE = 'https://odds.oddsblaze.com/';
+const API_HOST = 'odds.oddsblaze.com';
 
 if (!API_KEY) {
   console.error('ODDSBLAZE_API_KEY is required');
@@ -21,20 +21,15 @@ const SPORTSBOOKS = [
 ];
 
 // ─── Market Filter ─────────────────────────────────────────────────
-// Only keep markets that our bots actually use.
-// Playbook First Bets: first basket + method markets
-// Long Shot Scanner: player props + first basket
 const KEEP_MARKETS = new Set([
-  // First basket (Playbook + Scanner)
   'First Basket',
-  'First Field Goal',             // BetMGM
+  'First Field Goal',
   'Away Team First Basket',
   'Home Team First Basket',
   'Away Team First Field Goal',
   'Home Team First Field Goal',
   'First Basket Method 5-Way',
   'First Basket Method 3-Way',
-  // Player props (Scanner)
   'Player Points',
   'Player Rebounds',
   'Player Assists',
@@ -50,52 +45,87 @@ const KEEP_MARKETS = new Set([
   'Player Triple Double',
 ]);
 
+// ─── Reusable HTTPS agent (connection pooling) ─────────────────────
+const agent = new https.Agent({
+  keepAlive: true,
+  maxSockets: 5,        // limit concurrent connections
+  maxFreeSockets: 5,
+  timeout: 15000,
+});
+
 // ─── State ─────────────────────────────────────────────────────────
 let pollCount = 0;
 let lastPollMs = 0;
 let errorCount = 0;
-let polling = false; // guard against overlapping polls
+let polling = false;
 
-// ─── Fetching ──────────────────────────────────────────────────────
+// ─── Fetch single book (native https, no axios) ───────────────────
+
+function fetchBook(book) {
+  return new Promise((resolve) => {
+    const path = `/?key=${API_KEY}&sportsbook=${book}&league=${LEAGUE}`;
+    const req = https.get({ hostname: API_HOST, path, agent, timeout: 15000 }, (res) => {
+      const chunks = [];
+      res.on('data', (chunk) => chunks.push(chunk));
+      res.on('end', () => {
+        try {
+          const raw = Buffer.concat(chunks);
+          chunks.length = 0; // release refs
+          const data = JSON.parse(raw);
+          if (data && data.events) {
+            // Filter immediately — don't hold the full response
+            const filtered = filterBookEvents(data.events);
+            resolve({ book, events: filtered });
+          } else {
+            resolve({ book, events: [] });
+          }
+        } catch {
+          errorCount++;
+          resolve({ book, events: [] });
+        }
+      });
+    });
+    req.on('error', () => { errorCount++; resolve({ book, events: [] }); });
+    req.on('timeout', () => { req.destroy(); errorCount++; resolve({ book, events: [] }); });
+  });
+}
+
+// ─── Filter (per-book, applied immediately after parse) ────────────
+
+function filterBookEvents(events) {
+  const out = [];
+  for (const event of events) {
+    if (event.live) continue; // drop live events
+    const odds = [];
+    for (const odd of (event.odds || [])) {
+      if (KEEP_MARKETS.has(odd.market || '')) {
+        odds.push(odd);
+      }
+    }
+    out.push({
+      id: event.id,
+      teams: event.teams,
+      date: event.date,
+      live: event.live,
+      odds,
+    });
+  }
+  return out;
+}
+
+// ─── Fetch all books (batched, 5 at a time) ────────────────────────
 
 async function fetchAllSportsbooks() {
   const results = {};
-  const promises = SPORTSBOOKS.map(async (book) => {
-    try {
-      const url = `${API_BASE}?key=${API_KEY}&sportsbook=${book}&league=${LEAGUE}`;
-      const resp = await axios.get(url, { timeout: 15000 });
-      if (resp.data && resp.data.events) {
-        results[book] = resp.data.events;
-      }
-    } catch (err) {
-      errorCount++;
+  const BATCH_SIZE = 5;
+  for (let i = 0; i < SPORTSBOOKS.length; i += BATCH_SIZE) {
+    const batch = SPORTSBOOKS.slice(i, i + BATCH_SIZE);
+    const batchResults = await Promise.all(batch.map(fetchBook));
+    for (const { book, events } of batchResults) {
+      results[book] = events;
     }
-  });
-  await Promise.all(promises);
-  return results;
-}
-
-// ─── Filter ────────────────────────────────────────────────────────
-
-function filterEvents(bookEvents) {
-  const filtered = {};
-  for (const [book, events] of Object.entries(bookEvents)) {
-    filtered[book] = events.map(event => {
-      // Keep event metadata, filter odds to only relevant markets
-      const filteredOdds = (event.odds || []).filter(odd => {
-        const market = odd.market || '';
-        return KEEP_MARKETS.has(market);
-      });
-      return {
-        id: event.id,
-        teams: event.teams,
-        date: event.date,
-        live: event.live,
-        odds: filteredOdds,
-      };
-    }).filter(event => !event.live); // drop live events entirely
   }
-  return filtered;
+  return results;
 }
 
 // ─── Write Cache ───────────────────────────────────────────────────
@@ -122,12 +152,11 @@ function writeCache(latestEvents) {
 // ─── Poll Loop ─────────────────────────────────────────────────────
 
 async function poll() {
-  if (polling) return; // skip if previous poll still running
+  if (polling) return;
   polling = true;
   const start = Date.now();
   try {
-    const rawEvents = await fetchAllSportsbooks();
-    const filtered = filterEvents(rawEvents);
+    const filtered = await fetchAllSportsbooks();
 
     const bookCount = Object.keys(filtered).length;
     const oddsCount = Object.values(filtered).reduce(
@@ -139,10 +168,16 @@ async function poll() {
     pollCount++;
     lastPollMs = Date.now() - start;
 
+    // Log every 15th poll + memory usage
     if (pollCount % 15 === 1) {
       const fileSize = (fs.statSync(CACHE_PATH).size / 1024).toFixed(0);
-      console.log(`[${new Date().toISOString()}] Poll #${pollCount} | ${bookCount} books | ${oddsCount} odds | ${lastPollMs}ms | ${fileSize}KB`);
+      const memMB = (process.memoryUsage.rss() / 1024 / 1024).toFixed(0);
+      console.log(`[${new Date().toISOString()}] Poll #${pollCount} | ${bookCount} books | ${oddsCount} odds | ${lastPollMs}ms | ${fileSize}KB | ${memMB}MB RSS`);
     }
+
+    // Hint GC if available (run with --expose-gc)
+    if (global.gc) global.gc();
+
   } catch (err) {
     errorCount++;
     console.error(`[${new Date().toISOString()}] Poll error: ${err.message}`);

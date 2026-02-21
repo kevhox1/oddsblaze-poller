@@ -27,7 +27,7 @@ const SPORTSBOOKS = [
 const KEEP_MARKETS = new Set([
   // First basket (Playbook + Scanner)
   'First Basket',
-  'First Field Goal',
+  'First Field Goal',             // BetMGM
   'Away Team First Basket',
   'Home Team First Basket',
   'Away Team First Field Goal',
@@ -78,6 +78,7 @@ async function fetchAllSportsbooks() {
 // ─── Filter ────────────────────────────────────────────────────────
 
 function filterEvents(bookEvents) {
+  const now = Date.now();
   const filtered = {};
   for (const [book, events] of Object.entries(bookEvents)) {
     filtered[book] = events.map(event => {
@@ -93,7 +94,16 @@ function filterEvents(bookEvents) {
         live: event.live,
         odds: filteredOdds,
       };
-    }).filter(event => !event.live); // drop live events entirely
+    }).filter(event => {
+      // Drop live events
+      if (event.live) return false;
+      // Drop events that have already started (game time has passed)
+      if (event.date) {
+        const gameTime = new Date(event.date).getTime();
+        if (gameTime <= now) return false;
+      }
+      return true;
+    });
   }
   return filtered;
 }

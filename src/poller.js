@@ -15,7 +15,7 @@ if (!API_KEY) {
 }
 
 const SPORTSBOOKS = [
-  'draftkings', 'fanduel', 'betmgm', 'caesars', 'betrivers',
+  'draftkings', 'fanduel', 'fanduel-yourway', 'betmgm', 'caesars', 'betrivers',
   'fanatics', 'betparx', 'fliff', 'thescore', 'pinnacle',
   'circa', 'bet365', 'bally-bet', 'hard-rock', 'prophetx'
 ];

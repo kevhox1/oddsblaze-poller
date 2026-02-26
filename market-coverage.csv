@@ -1,0 +1,20 @@
+Market,DraftKings,FanDuel,BetMGM,Caesars,BetRivers,Fanatics,BetParx,Fliff,TheScore,Pinnacle,Circa,Bet365,Bally Bet,Hard Rock,ProphetX
+First Basket,✓,✓,✗,✗,✗,✗,✗,✗,✗,✗,✗,✗,✗,✓,✗
+First Field Goal,✗,✗,✗,✗,✗,✓,✗,✗,✗,✗,✗,✗,✗,✗,✗
+Away Team First Basket,✗,✓,✗,✗,✗,✗,✗,✗,✗,✗,✗,✗,✗,✗,✗
+Home Team First Basket,✗,✓,✗,✗,✗,✗,✗,✗,✗,✗,✗,✗,✗,✗,✗
+First Basket Method 3-Way,✓,✗,✗,✗,✗,✗,✗,✗,✗,✗,✗,✗,✗,✗,✗
+First Basket Method 5-Way,✗,✗,✗,✗,✗,✗,✗,✗,✗,✗,✗,✗,✗,✗,✗
+Player Points,✓,✓,✗,✓,✗,✓,✗,✓,✗,✗,✗,✓,✗,✓,✓
+Player Rebounds,✓,✓,✗,✓,✗,✓,✗,✓,✗,✗,✗,✓,✗,✓,✓
+Player Assists,✓,✓,✗,✓,✗,✓,✗,✓,✗,✗,✗,✓,✗,✓,✓
+Player Threes Made,✓,✓,✗,✓,✗,✓,✗,✓,✗,✗,✗,✓,✗,✓,✓
+Player Blocks,✓,✗,✗,✗,✗,✓,✗,✗,✗,✗,✗,✓,✗,✓,✗
+Player Steals,✗,✗,✗,✗,✗,✓,✗,✓,✗,✗,✗,✓,✗,✓,✗
+Player Blocks + Steals,✗,✗,✗,✗,✗,✗,✗,✓,✗,✗,✗,✓,✗,✓,✗
+Player Points + Rebounds + Assists,✓,✓,✗,✓,✗,✓,✗,✓,✗,✗,✗,✓,✗,✓,✓
+Player Points + Rebounds,✓,✓,✗,✓,✗,✓,✗,✓,✗,✗,✗,✓,✗,✓,✗
+Player Points + Assists,✓,✓,✗,✓,✗,✓,✗,✓,✗,✗,✗,✓,✗,✓,✗
+Player Rebounds + Assists,✓,✓,✗,✓,✗,✓,✗,✓,✗,✗,✗,✓,✗,✓,✓
+Player Double Double,✓,✓,✗,✓,✗,✗,✗,✓,✗,✗,✗,✗,✗,✓,✓
+Player Triple Double,✓,✓,✗,✗,✗,✗,✗,✗,✗,✗,✗,✗,✗,✓,✗

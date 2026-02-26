@@ -1,6 +1,8 @@
 import 'dotenv/config';
 import https from 'https';
 import fs from 'fs';
+import path from 'path';
+import { gzipSync } from 'zlib';
 
 // ─── Config ────────────────────────────────────────────────────────
 const API_KEY = process.env.ODDSBLAZE_API_KEY;
@@ -8,6 +10,10 @@ const POLL_INTERVAL = parseInt(process.env.POLL_INTERVAL_MS || '4000', 10);
 const CACHE_PATH = process.env.CACHE_FILE_PATH || '/tmp/oddsblaze-cache.json';
 const LEAGUE = process.env.LEAGUE || 'nba';
 const API_HOST = 'odds.oddsblaze.com';
+
+const SNAPSHOT_INTERVAL = parseInt(process.env.SNAPSHOT_INTERVAL_MS || '300000', 10); // 5 min
+const SNAPSHOT_DIR = process.env.SNAPSHOT_DIR || '/tmp/oddsblaze-history';
+const SNAPSHOT_RETENTION_DAYS = parseInt(process.env.SNAPSHOT_RETENTION_DAYS || '7', 10);
 
 if (!API_KEY) {
   console.error('ODDSBLAZE_API_KEY is required');
@@ -164,6 +170,7 @@ async function poll() {
     );
 
     writeCache(filtered);
+    latestCache = filtered;
 
     pollCount++;
     lastPollMs = Date.now() - start;
@@ -186,6 +193,72 @@ async function poll() {
   }
 }
 
+// ─── Snapshots (historical line movement) ──────────────────────────
+
+let snapshotCount = 0;
+
+function slimCache(latestEvents) {
+  const slim = {};
+  for (const [book, events] of Object.entries(latestEvents)) {
+    const rows = [];
+    for (const ev of events) {
+      for (const odd of ev.odds) {
+        rows.push({
+          e: ev.id,                          // event id
+          m: odd.market,                     // market name
+          s: odd.selection?.name || '',      // selection (player name)
+          l: odd.selection?.line ?? null,     // line
+          p: odd.price,                      // decimal price
+          mn: odd.main ?? null,              // main line flag
+        });
+      }
+    }
+    if (rows.length) slim[book] = rows;
+  }
+  return slim;
+}
+
+function writeSnapshot(latestEvents) {
+  try {
+    fs.mkdirSync(SNAPSHOT_DIR, { recursive: true });
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    const snap = {
+      ts: new Date().toISOString(),
+      tsMs: Date.now(),
+      data: slimCache(latestEvents),
+    };
+    const json = JSON.stringify(snap);
+    const gz = gzipSync(json, { level: 6 });
+    const filePath = path.join(SNAPSHOT_DIR, `${ts}.json.gz`);
+    fs.writeFileSync(filePath, gz);
+    snapshotCount++;
+    const sizeMB = (gz.length / 1024 / 1024).toFixed(2);
+    console.log(`[${new Date().toISOString()}] Snapshot #${snapshotCount} | ${sizeMB}MB gz | ${filePath}`);
+  } catch (err) {
+    console.error(`[${new Date().toISOString()}] Snapshot error: ${err.message}`);
+  }
+}
+
+function purgeOldSnapshots() {
+  try {
+    const cutoff = Date.now() - SNAPSHOT_RETENTION_DAYS * 86400000;
+    const files = fs.readdirSync(SNAPSHOT_DIR);
+    let removed = 0;
+    for (const f of files) {
+      const fp = path.join(SNAPSHOT_DIR, f);
+      const stat = fs.statSync(fp);
+      if (stat.mtimeMs < cutoff) {
+        fs.unlinkSync(fp);
+        removed++;
+      }
+    }
+    if (removed) console.log(`[${new Date().toISOString()}] Purged ${removed} old snapshots`);
+  } catch { /* dir may not exist yet */ }
+}
+
+// Track latest data for snapshot timer
+let latestCache = null;
+
 // ─── Start ─────────────────────────────────────────────────────────
 
 console.log(`OddsBlaze Poller starting`);
@@ -196,5 +269,18 @@ console.log(`  Sportsbooks: ${SPORTSBOOKS.length}`);
 console.log(`  Tracked markets: ${KEEP_MARKETS.size}`);
 console.log('');
 
+console.log(`  Snapshots: every ${SNAPSHOT_INTERVAL / 1000}s → ${SNAPSHOT_DIR}`);
+console.log(`  Retention: ${SNAPSHOT_RETENTION_DAYS} days`);
+console.log('');
+
 poll();
 setInterval(poll, POLL_INTERVAL);
+
+// Snapshot timer — independent of poll loop
+setInterval(() => {
+  if (latestCache) writeSnapshot(latestCache);
+}, SNAPSHOT_INTERVAL);
+
+// Purge old snapshots once on start, then daily
+purgeOldSnapshots();
+setInterval(purgeOldSnapshots, 86400000);
